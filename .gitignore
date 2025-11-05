@@ -1,0 +1,13 @@
+# Build-Artefakte
+*.exe
+*.so
+*.dylib
+
+# Cache-Verzeichnisse
+.zig-cache/
+
+# Objekt-Dateien
+*.o
+
+# Eigene Builds, die nicht versioniert werden sollen
+build/
