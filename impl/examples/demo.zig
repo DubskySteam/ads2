@@ -17,32 +17,56 @@ pub fn main() !void {
 
     const stdout = std.debug;
 
+    const inserts = [_]i32{ 50918, 1023981, 232, 2, 2093, 3952, 239252, 99999 };
+
     stdout.print("OrderStatisticTree demo\n\n", .{});
-
-    const inserts = [_]i32{ 5, 3, 8, 1, 4, 7, 9, 2, 6, 10 };
-
-    stdout.print("Inserts:\n", .{});
-    stdout.print("  value\n", .{});
-    stdout.print("  -----\n", .{});
+    stdout.print("Inserts:\n  value\n  -----\n", .{});
 
     for (inserts) |v| {
         try tree.insert(v);
-        stdout.print("  {d}\n", .{v});
+        stdout.print("  {d}", .{v});
     }
 
+    stdout.print("\n\n", .{});
+
+    var ids: [32]usize = undefined;
+    var vals: [32]i32 = undefined;
+    var len: usize = 0;
+
+    var cur_opt = tree.min();
+    while (cur_opt) |nr| {
+        if (len >= ids.len) break;
+        ids[len] = nr.index;
+        vals[len] = nr.data;
+        len += 1;
+
+        cur_opt = tree.successor(nr.data);
+    }
+
+    stdout.print("Tree in-order:\n", .{});
+    stdout.print("ID  >>", .{});
+    var i: usize = 0;
+    while (i < len) : (i += 1) {
+        if (i == 0) {
+            stdout.print(" {d:>8}", .{ids[i]});
+        } else {
+            stdout.print(" | {d:>8}", .{ids[i]});
+        }
+    }
     stdout.print("\n", .{});
 
-    stdout.print("Tree elements in order (index, value):\n", .{});
-    stdout.print("  idx | val\n", .{});
-    stdout.print("  ----------\n", .{});
-
-    var current = tree.min();
-    while (current) |node_res| {
-        stdout.print("  {d:3} | {d}\n", .{ node_res.index, node_res.data });
-        current = tree.successor(node_res.data);
+    stdout.print("VAL >>", .{});
+    i = 0;
+    while (i < len) : (i += 1) {
+        if (i == 0) {
+            stdout.print(" {d:>8}", .{vals[i]});
+        } else {
+            stdout.print(" | {d:>8}", .{vals[i]});
+        }
     }
+    stdout.print("\n\n", .{});
 
-    const search_keys = [_]i32{ 4, 11 };
+    const search_keys = [_]i32{ 99999, 11 };
 
     stdout.print("Search operations:\n", .{});
     stdout.print("  value | found\n", .{});
@@ -55,7 +79,7 @@ pub fn main() !void {
 
     stdout.print("\n", .{});
 
-    const query_keys = [_]i32{ 5, 6 };
+    const query_keys = [_]i32{ 3000, 60000, 99999 };
 
     stdout.print("Predecessor / Successor:\n", .{});
     stdout.print("  key | pred(idx,val)   | succ(idx,val)\n", .{});
