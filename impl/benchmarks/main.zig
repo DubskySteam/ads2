@@ -98,6 +98,7 @@ pub fn main() !void {
 
 fn printResults(results: []const OperationResult) !void {
     std.debug.print("Benchmark results\n", .{});
+    std.debug.print("1 Element = i32\n\n", .{});
     for (results) |r| {
         const ns_f = @as(f64, @floatFromInt(r.ns));
         const elems_f = @as(f64, @floatFromInt(r.elems));
@@ -110,6 +111,7 @@ fn printResults(results: []const OperationResult) !void {
             "[{s}]\n  > {d:.6} elems/ns | {d:.2} elems/ms | {d:.2} elems/s\n",
             .{ r.operation, per_ns, per_ms, per_s },
         );
+        std.debug.print("{s} of 5.000.000 Elements in {}s\n\n", .{ r.operation, 5_000_000 / per_s });
     }
 }
 
