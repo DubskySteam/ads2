@@ -147,45 +147,41 @@ pub fn OrderStatisticTree(comptime T: type, comptime compareFn: fn (a: T, b: T) 
 
         pub fn predecessor(self: *Self, data: T) ?NodeResult {
             var current = self.root;
-            var last_le: ?*Node = null;
+            var last_lt: ?*Node = null;
 
             while (current) |node| {
                 switch (compareFn(data, node.data)) {
-                    .eq => {
-                        last_le = node;
-                        break;
-                    },
-                    .lt => current = node.left,
+                    // data > node.data  => node.data < data: candidate, go right
                     .gt => {
-                        last_le = node;
+                        last_lt = node;
                         current = node.right;
                     },
+                    // data <= node.data => go left, do not update candidate
+                    .lt, .eq => current = node.left,
                 }
             }
 
-            const target = last_le orelse return null;
+            const target = last_lt orelse return null;
             return NodeResult{ .index = self.getRank(target), .data = target.data };
         }
 
         pub fn successor(self: *Self, data: T) ?NodeResult {
             var current = self.root;
-            var last_ge: ?*Node = null;
+            var last_gt: ?*Node = null;
 
             while (current) |node| {
                 switch (compareFn(data, node.data)) {
-                    .eq => {
-                        last_ge = node;
-                        break;
-                    },
+                    // data < node.data  => node.data > data: candidate, go left
                     .lt => {
-                        last_ge = node;
+                        last_gt = node;
                         current = node.left;
                     },
-                    .gt => current = node.right,
+                    // data >= node.data => go right, do not update candidate
+                    .gt, .eq => current = node.right,
                 }
             }
 
-            const target = last_ge orelse return null;
+            const target = last_gt orelse return null;
             return NodeResult{ .index = self.getRank(target), .data = target.data };
         }
 
