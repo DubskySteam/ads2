@@ -26,6 +26,11 @@ pub fn build(b: *std.Build) void {
     });
     demo_exe.root_module.addImport("ost", ost_mod);
     b.installArtifact(demo_exe);
+    const demo_asm_install = b.addInstallBinFile(
+        demo_exe.getEmittedAsm(),
+        "ost-demo.s", // ASM TO CHECK IF WE CAN REDUCE THE OVERHEAD
+    );
+    b.getInstallStep().dependOn(&demo_asm_install.step);
 
     const run_demo = b.addRunArtifact(demo_exe);
     run_demo.step.dependOn(b.getInstallStep());
