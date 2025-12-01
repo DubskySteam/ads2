@@ -3,7 +3,13 @@ const Allocator = std.mem.Allocator;
 const Order = std.math.Order;
 const node_mod = @import("node.zig");
 
-pub fn OrderStatisticTree(comptime T: type, comptime compareFn: fn (a: T, b: T) Order) type {
+pub const OrderStatisticTreeConfig = struct { use_freelist: bool = true };
+
+pub fn OrderStatisticTree(
+    comptime T: type,
+    comptime compareFn: fn (a: T, b: T) std.math.Order,
+    comptime cfg: OrderStatisticTreeConfig,
+) type {
     return struct {
         const Self = @This();
         pub const Node = node_mod.Node(T);
@@ -11,6 +17,7 @@ pub fn OrderStatisticTree(comptime T: type, comptime compareFn: fn (a: T, b: T) 
 
         root: ?*Node,
         allocator: Allocator,
+        free_list: ?*Node = null,
 
         pub fn init(allocator: Allocator) Self {
             return Self{
@@ -21,11 +28,45 @@ pub fn OrderStatisticTree(comptime T: type, comptime compareFn: fn (a: T, b: T) 
 
         pub fn deinit(self: *Self) void {
             if (self.root) |root| self.deinitNode(root);
+
+            if (cfg.use_freelist) {
+                var n = self.free_list;
+                while (n) |node| {
+                    const next = node.right;
+                    self.allocator.destroy(node);
+                    n = next;
+                }
+                self.free_list = null;
+            }
         }
 
         fn deinitNode(self: *Self, node: *Node) void {
             if (node.left) |l| self.deinitNode(l);
             if (node.right) |r| self.deinitNode(r);
+            self.allocator.destroy(node);
+        }
+
+        fn allocNode(self: *Self) !*Node {
+            if (cfg.use_freelist) {
+                if (self.free_list) |n| {
+                    self.free_list = n.right;
+                    n.parent = null;
+                    n.left = null;
+                    n.right = null;
+                    return n;
+                }
+            }
+            return try self.allocator.create(Node);
+        }
+
+        fn freeNode(self: *Self, node: *Node) void {
+            if (cfg.use_freelist) {
+                node.parent = null;
+                node.left = null;
+                node.right = self.free_list;
+                self.free_list = node;
+                return;
+            }
             self.allocator.destroy(node);
         }
 
@@ -46,7 +87,7 @@ pub fn OrderStatisticTree(comptime T: type, comptime compareFn: fn (a: T, b: T) 
                 }
             }
 
-            const new_node = try self.allocator.create(Node);
+            const new_node = try self.allocNode();
             new_node.* = Node{
                 .data = data,
                 .size = 1,
@@ -123,7 +164,7 @@ pub fn OrderStatisticTree(comptime T: type, comptime compareFn: fn (a: T, b: T) 
                 self.deleteFixup(x, x_parent);
             }
 
-            self.allocator.destroy(z);
+            self.freeNode(z);
         }
 
         pub fn search(self: *Self, data: T) bool {
