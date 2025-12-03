@@ -3,7 +3,10 @@ const Allocator = std.mem.Allocator;
 const Order = std.math.Order;
 const node_mod = @import("node.zig");
 
-pub const OrderStatisticTreeConfig = struct { use_freelist: bool = true };
+pub const OrderStatisticTreeConfig = struct {
+    use_freelist: bool = true,
+    compact_sizes: bool = false,
+};
 
 pub fn OrderStatisticTree(
     comptime T: type,
@@ -14,6 +17,7 @@ pub fn OrderStatisticTree(
         const Self = @This();
         pub const Node = node_mod.Node(T);
         pub const NodeResult = node_mod.NodeResult(T);
+        const SizeInt = if (cfg.compact_sizes) u32 else usize;
 
         root: ?*Node,
         allocator: Allocator,
@@ -226,13 +230,16 @@ pub fn OrderStatisticTree(
             return NodeResult{ .index = self.getRank(target), .data = target.data };
         }
 
-        fn sizeOf(node: ?*Node) usize {
-            return if (node) |n| n.size else 0;
+        fn sizeOf(node: ?*Node) SizeInt {
+            return if (node) |n| @intCast(n.size) else 0;
         }
 
         fn updateSize(self: *Self, node: *Node) void {
             _ = self;
-            node.size = sizeOf(node.left) + sizeOf(node.right) + node.count;
+            const left: SizeInt = sizeOf(node.left);
+            const right: SizeInt = sizeOf(node.right);
+            const count_cast: SizeInt = @intCast(node.count);
+            node.size = @intCast(left + right + count_cast);
         }
 
         fn updatePathSize(self: *Self, start_node: *Node) void {
@@ -269,12 +276,12 @@ pub fn OrderStatisticTree(
 
         fn getRank(self: *Self, node: *Node) usize {
             _ = self;
-            var r = sizeOf(node.left);
+            var r: usize = @intCast(sizeOf(node.left));
             var curr = node;
 
             while (curr.parent) |parent| {
                 if (curr == parent.right) {
-                    r += sizeOf(parent.left) + parent.count;
+                    r += @as(usize, @intCast(sizeOf(parent.left))) + parent.count;
                 }
                 curr = parent;
             }
