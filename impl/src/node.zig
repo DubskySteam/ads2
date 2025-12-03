@@ -14,14 +14,13 @@ pub fn Node(comptime T: type) type {
         const Self = @This();
 
         data: T,
-
-        size: usize,
-        count: usize,
-
-        parent: ?*Self,
         left: ?*Self,
         right: ?*Self,
 
+        parent: ?*Self,
+
+        size: usize,
+        count: usize,
         color: Color,
     };
 }
