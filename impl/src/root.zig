@@ -3,7 +3,15 @@ const Allocator = std.mem.Allocator;
 const Order = std.math.Order;
 const node_mod = @import("node.zig");
 
-pub const OrderStatisticTreeConfig = struct { use_freelist: bool = true };
+pub const OrderStatisticTreeConfig = struct {
+    const AllocationMode = enum {
+        general, // use upstream allocator directly
+        arena, // use internal ArenaAllocator
+    };
+
+    use_freelist: bool = true,
+    allocation_mode: AllocationMode = .general,
+};
 
 pub fn OrderStatisticTree(
     comptime T: type,
@@ -15,14 +23,61 @@ pub fn OrderStatisticTree(
         pub const Node = node_mod.Node(T);
         pub const NodeResult = node_mod.NodeResult(T);
 
+        const AllocState = switch (cfg.allocation_mode) {
+            .general => struct {
+                const SelfAlloc = @This();
+
+                upstream: Allocator,
+
+                fn init(upstream: Allocator) SelfAlloc {
+                    return .{ .upstream = upstream };
+                }
+
+                fn deinit(self: *SelfAlloc) void {
+                    _ = self;
+                }
+
+                inline fn alloc(self: *SelfAlloc) !*Node {
+                    return try self.upstream.create(Node);
+                }
+
+                inline fn free(self: *SelfAlloc, node: *Node) void {
+                    self.upstream.destroy(node);
+                }
+            },
+            .arena => struct {
+                const SelfAlloc = @This();
+
+                arena: std.heap.ArenaAllocator,
+
+                fn init(upstream: Allocator) SelfAlloc {
+                    return .{ .arena = std.heap.ArenaAllocator.init(upstream) };
+                }
+
+                fn deinit(self: *SelfAlloc) void {
+                    self.arena.deinit();
+                }
+
+                inline fn alloc(self: *SelfAlloc) !*Node {
+                    return try self.arena.allocator().create(Node);
+                }
+
+                inline fn free(self: *SelfAlloc, node: *Node) void {
+                    _ = self;
+                    _ = node; // per-node free is intentionally a no-op
+                }
+            },
+        };
+
         root: ?*Node,
-        allocator: Allocator,
+        alloc_state: AllocState,
         free_list: ?*Node = null,
 
-        pub fn init(allocator: Allocator) Self {
-            return Self{
+        pub fn init(upstream: Allocator) Self {
+            return .{
                 .root = null,
-                .allocator = allocator,
+                .alloc_state = AllocState.init(upstream),
+                .free_list = null,
             };
         }
 
@@ -33,20 +88,22 @@ pub fn OrderStatisticTree(
                 var n = self.free_list;
                 while (n) |node| {
                     const next = node.right;
-                    self.allocator.destroy(node);
+                    self.alloc_state.free(node);
                     n = next;
                 }
                 self.free_list = null;
             }
+
+            self.alloc_state.deinit();
         }
 
         fn deinitNode(self: *Self, node: *Node) void {
             if (node.left) |l| self.deinitNode(l);
             if (node.right) |r| self.deinitNode(r);
-            self.allocator.destroy(node);
+            self.alloc_state.free(node);
         }
 
-        fn allocNode(self: *Self) !*Node {
+        inline fn allocNode(self: *Self) !*Node {
             if (cfg.use_freelist) {
                 if (self.free_list) |n| {
                     self.free_list = n.right;
@@ -56,18 +113,18 @@ pub fn OrderStatisticTree(
                     return n;
                 }
             }
-            return try self.allocator.create(Node);
+            return try self.alloc_state.alloc();
         }
 
-        fn freeNode(self: *Self, node: *Node) void {
+        inline fn freeNode(self: *Self, node: *Node) void {
             if (cfg.use_freelist) {
                 node.parent = null;
                 node.left = null;
                 node.right = self.free_list;
                 self.free_list = node;
-                return;
+            } else {
+                self.alloc_state.free(node);
             }
-            self.allocator.destroy(node);
         }
 
         pub fn insert(self: *Self, data: T) !void {

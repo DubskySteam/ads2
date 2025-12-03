@@ -7,7 +7,7 @@ fn cmpI32(a: i32, b: i32) std.math.Order {
     return std.math.order(a, b);
 }
 
-const TreeNoPool = ost.OrderStatisticTree(i32, cmpI32, .{ .use_freelist = false });
+const TreeNoPool = ost.OrderStatisticTree(i32, cmpI32, .{ .use_freelist = false, .allocation_mode = .general });
 const TreePool = ost.OrderStatisticTree(i32, cmpI32, .{ .use_freelist = true });
 
 const Allocator = std.mem.Allocator;
