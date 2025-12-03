@@ -3,11 +3,33 @@ const Allocator = std.mem.Allocator;
 const Order = std.math.Order;
 const node_mod = @import("node.zig");
 
+/// Konfiguration für den Order‑Statistic‑Tree.
+///
+/// - use_freelist:
+///   Schaltet einen einfachen Freelist‑Speicherpool für gelöschte Knoten ein.
+///   Neue Knoten werden soweit möglich aus diesem Pool wiederverwendet.
+///
+/// - compact_sizes:
+///   Wenn true, werden Teilbaumgrößen intern in einem kompakteren Typ geführt
+///   (z.B. u32 statt usize), was die Knotengröße reduziert und den Cache
+///   besser ausnutzen kann. Alle externen Indizes bleiben usize.
 pub const OrderStatisticTreeConfig = struct {
     use_freelist: bool = true,
     compact_sizes: bool = false,
 };
 
+/// Erzeugt einen Order‑Statistic‑Tree über Schlüsseln vom Typ T.
+///
+/// Der Baum ist ein augmentierter Rot‑Schwarz‑Baum:
+/// - Er ist als binärer Suchbaum über compareFn geordnet.
+/// - Rot‑Schwarz‑Eigenschaften sorgen für Höhe O(log n).
+/// - Jeder Knoten speichert die Größe seines Teilbaums (inkl. Duplikate),
+///   sodass Rang‑Informationen (In‑Order‑Index) effizient berechnet werden
+///   können.
+///
+/// Die API unterstützt:
+/// - insert, delete, search, isEmpty
+/// - min, max, predecessor, successor
 pub fn OrderStatisticTree(
     comptime T: type,
     comptime compareFn: fn (a: T, b: T) std.math.Order,
@@ -17,12 +39,18 @@ pub fn OrderStatisticTree(
         const Self = @This();
         pub const Node = node_mod.Node(T);
         pub const NodeResult = node_mod.NodeResult(T);
+
+        /// Interner Typ für Teilbaumgrößen (abhängig von compact_sizes).
         const SizeInt = if (cfg.compact_sizes) u32 else usize;
 
+        /// Wurzelknoten des Baums (null, wenn leer).
         root: ?*Node,
+        /// Allokator für Knotenspeicher.
         allocator: Allocator,
+        /// Kopf der Freelist (nur genutzt, wenn use_freelist == true).
         free_list: ?*Node = null,
 
+        /// Initialisiert einen leeren Baum mit gegebenem Allokator.
         pub fn init(allocator: Allocator) Self {
             return Self{
                 .root = null,
@@ -30,6 +58,10 @@ pub fn OrderStatisticTree(
             };
         }
 
+        /// Gibt alle von diesem Baum belegten Ressourcen frei.
+        ///
+        /// - Zerstört rekursiv alle noch im Baum befindlichen Knoten.
+        /// - Gibt ggf. zusätzlich alle im Freelist‑Pool liegenden Knoten frei.
         pub fn deinit(self: *Self) void {
             if (self.root) |root| self.deinitNode(root);
 
@@ -44,12 +76,17 @@ pub fn OrderStatisticTree(
             }
         }
 
+        /// Rekursive Hilfe zum Freigeben aller Knoten im Baum.
         fn deinitNode(self: *Self, node: *Node) void {
             if (node.left) |l| self.deinitNode(l);
             if (node.right) |r| self.deinitNode(r);
             self.allocator.destroy(node);
         }
 
+        /// Allokiert einen neuen Knoten.
+        ///
+        /// Wenn use_freelist aktiviert ist, wird zuerst versucht, einen Knoten
+        /// aus dem Freelist‑Pool zu recyceln, bevor der Allokator benutzt wird.
         fn allocNode(self: *Self) !*Node {
             if (cfg.use_freelist) {
                 if (self.free_list) |n| {
@@ -63,6 +100,10 @@ pub fn OrderStatisticTree(
             return try self.allocator.create(Node);
         }
 
+        /// Gibt einen Knoten frei.
+        ///
+        /// - Bei aktivem Freelist wird der Knoten nur in den Pool eingehängt.
+        /// - Andernfalls wird er direkt an den Allokator zurückgegeben.
         fn freeNode(self: *Self, node: *Node) void {
             if (cfg.use_freelist) {
                 node.parent = null;
@@ -74,10 +115,19 @@ pub fn OrderStatisticTree(
             self.allocator.destroy(node);
         }
 
+        /// Fügt ein Element in den Baum ein.
+        ///
+        /// - Wenn der Schlüssel bereits existiert, wird nur count im Knoten
+        ///   erhöht (Duplikate). Der Baum wächst strukturell nicht.
+        /// - Andernfalls wird ein neuer Knoten angelegt und per Rot‑Schwarz‑
+        ///   Fixup rebalanciert.
+        /// - size wird auf dem Pfad zur Wurzel aktualisiert.
         pub fn insert(self: *Self, data: T) !void {
             var y: ?*Node = null;
             var x = self.root;
 
+            // Letzte Vergleichsrichtung merken, um nach der Schleife
+            // nicht erneut compareFn aufrufen zu müssen.
             var last_ord: ?Order = null;
 
             while (x) |node| {
@@ -122,6 +172,14 @@ pub fn OrderStatisticTree(
             self.insertFixup(new_node);
         }
 
+        /// Entfernt ein Vorkommen von `data` aus dem Baum.
+        ///
+        /// - Falls der Schlüssel nicht existiert, passiert nichts.
+        /// - Bei count > 1 wird nur count dekrementiert, der physische
+        ///   Knoten bleibt erhalten, und size wird entlang des Pfades
+        ///   aktualisiert.
+        /// - Bei count == 1 wird der Knoten wie in einem Rot‑Schwarz‑Baum
+        ///   gelöscht und anschließend per deleteFixup rebalanciert.
         pub fn delete(self: *Self, data: T) void {
             const z = self.findNode(data) orelse return;
 
@@ -145,6 +203,8 @@ pub fn OrderStatisticTree(
                 x_parent = z.parent;
                 self.transplant(z, z.left);
             } else {
+                // Knoten mit zwei Kindern: Nachfolger im rechten Teilbaum suchen
+                // und z durch diesen Nachfolger ersetzen.
                 y = minimum(z.right.?);
                 y_orig_color = y.color;
                 x = y.right;
@@ -178,37 +238,55 @@ pub fn OrderStatisticTree(
             self.freeNode(z);
         }
 
+        /// Prüft, ob `data` im Baum enthalten ist (mindestens ein Vorkommen).
         pub fn search(self: *Self, data: T) bool {
             return self.findNode(data) != null;
         }
 
+        /// Liefert true, wenn der Baum leer ist.
         pub fn isEmpty(self: *Self) bool {
             return self.root == null;
         }
 
+        /// Liefert das kleinste Element und dessen In‑Order‑Index.
+        ///
+        /// - Index ist immer 0, da es das erste Element in der Sortierung ist.
+        /// - Gibt null zurück, wenn der Baum leer ist.
         pub fn min(self: *Self) ?NodeResult {
             const m = minimum(self.root orelse return null);
             return NodeResult{ .index = 0, .data = m.data };
         }
 
+        /// Liefert das größte Element und den In‑Order‑Index des ersten
+        /// Vorkommens dieses Schlüssels.
+        ///
+        /// - total_size entspricht der Gesamtzahl der Elemente im Baum.
+        /// - Index = total_size - count(max_key).
+        /// - Gibt null zurück, wenn der Baum leer ist.
         pub fn max(self: *Self) ?NodeResult {
             const m = maximum(self.root orelse return null);
             const total_size = if (self.root) |r| r.size else 0;
             return NodeResult{ .index = total_size - m.count, .data = m.data };
         }
 
+        /// Liefert den Vorgänger (strict predecessor) von `data`.
+        ///
+        /// - Sucht das größte Element, das STRICT kleiner als `data` ist
+        ///   (node.data < data).
+        /// - Gibt Schlüssel und In‑Order‑Index des ersten Vorkommens zurück.
+        /// - Gibt null zurück, falls kein solches Element existiert.
         pub fn predecessor(self: *Self, data: T) ?NodeResult {
             var current = self.root;
             var last_lt: ?*Node = null;
 
             while (current) |node| {
                 switch (compareFn(data, node.data)) {
-                    // data > node.data  => node.data < data: candidate, go right
+                    // data > node.data  => node.data < data: Kandidat, gehe rechts
                     .gt => {
                         last_lt = node;
                         current = node.right;
                     },
-                    // data <= node.data => go left, do not update candidate
+                    // data <= node.data => gehe links, Kandidat bleibt unverändert
                     .lt, .eq => current = node.left,
                 }
             }
@@ -217,18 +295,24 @@ pub fn OrderStatisticTree(
             return NodeResult{ .index = self.getRank(target), .data = target.data };
         }
 
+        /// Liefert den Nachfolger (strict successor) von `data`.
+        ///
+        /// - Sucht das kleinste Element, das STRICT größer als `data` ist
+        ///   (node.data > data).
+        /// - Gibt Schlüssel und In‑Order‑Index des ersten Vorkommens zurück.
+        /// - Gibt null zurück, falls kein solches Element existiert.
         pub fn successor(self: *Self, data: T) ?NodeResult {
             var current = self.root;
             var last_gt: ?*Node = null;
 
             while (current) |node| {
                 switch (compareFn(data, node.data)) {
-                    // data < node.data  => node.data > data: candidate, go left
+                    // data < node.data  => node.data > data: Kandidat, gehe links
                     .lt => {
                         last_gt = node;
                         current = node.left;
                     },
-                    // data >= node.data => go right, do not update candidate
+                    // data >= node.data => gehe rechts, Kandidat bleibt unverändert
                     .gt, .eq => current = node.right,
                 }
             }
@@ -237,10 +321,12 @@ pub fn OrderStatisticTree(
             return NodeResult{ .index = self.getRank(target), .data = target.data };
         }
 
+        /// Liefert die Größe eines Teilbaums (0 bei null) im internen SizeInt-Typ.
         inline fn sizeOf(node: ?*Node) SizeInt {
             return if (node) |n| @intCast(n.size) else 0;
         }
 
+        /// Aktualisiert das size‑Feld eines Knotens aus Kindern und count.
         inline fn updateSize(self: *Self, node: *Node) void {
             _ = self;
             const left: SizeInt = sizeOf(node.left);
@@ -249,6 +335,7 @@ pub fn OrderStatisticTree(
             node.size = @intCast(left + right + count_cast);
         }
 
+        /// Aktualisiert size entlang des Pfades von start_node bis zur Wurzel.
         fn updatePathSize(self: *Self, start_node: *Node) void {
             var curr: ?*Node = start_node;
             while (curr) |node| {
@@ -257,6 +344,7 @@ pub fn OrderStatisticTree(
             }
         }
 
+        /// Sucht den Knoten mit Schlüssel data (oder null, falls nicht vorhanden).
         fn findNode(self: *Self, data: T) ?*Node {
             var current = self.root;
             while (current) |node| {
@@ -269,18 +357,26 @@ pub fn OrderStatisticTree(
             return null;
         }
 
+        /// Liefert den minimalen Knoten im Teilbaum.
         fn minimum(node: *Node) *Node {
             var curr = node;
             while (curr.left) |l| curr = l;
             return curr;
         }
 
+        /// Liefert den maximalen Knoten im Teilbaum.
         fn maximum(node: *Node) *Node {
             var curr = node;
             while (curr.right) |r| curr = r;
             return curr;
         }
 
+        /// Berechnet den In‑Order‑Rang (0‑basiert) eines Knotens.
+        ///
+        /// Berücksichtigt:
+        /// - Größe des linken Teilbaums,
+        /// - count in allen Vorfahren, bei denen der aktuelle Knoten
+        ///   im rechten Kind hängt.
         fn getRank(self: *Self, node: *Node) usize {
             _ = self;
             var r: usize = @intCast(sizeOf(node.left));
@@ -295,6 +391,10 @@ pub fn OrderStatisticTree(
             return r;
         }
 
+        /// Linksdrehung um Knoten x (klassische RB‑Rotation).
+        ///
+        /// Erhält die In‑Order‑Reihenfolge und passt danach lokal die size‑Werte
+        /// von x und y an.
         fn rotateLeft(self: *Self, x: *Node) void {
             const y = x.right orelse return;
             x.right = y.left;
@@ -318,6 +418,10 @@ pub fn OrderStatisticTree(
             self.updateSize(y);
         }
 
+        /// Rechtsdrehung um Knoten y (klassische RB‑Rotation).
+        ///
+        /// Erhält die In‑Order‑Reihenfolge und passt danach lokal die size‑Werte
+        /// von y und x an.
         fn rotateRight(self: *Self, y: *Node) void {
             const x = y.left orelse return;
             y.left = x.right;
@@ -341,6 +445,10 @@ pub fn OrderStatisticTree(
             self.updateSize(x);
         }
 
+        /// Fixup nach Einfügen eines neuen roten Knotens.
+        ///
+        /// Löst Verstöße gegen die Rot‑Schwarz‑Invarianten (z.B. Doppelt‑Rot)
+        /// durch geeignete Umfärbungen und Rotationen.
         fn insertFixup(self: *Self, start_z: *Node) void {
             var z = start_z;
             while (z.parent != null and z.parent.?.color == .Red) {
@@ -384,6 +492,8 @@ pub fn OrderStatisticTree(
             self.root.?.color = .Black;
         }
 
+        /// Ersetzt Teilbaum u durch Teilbaum v (Standard‑Hilfsfunktion
+        /// aus RB‑Löschalgorithmus).
         fn transplant(self: *Self, u: *Node, v: ?*Node) void {
             if (u.parent == null) {
                 self.root = v;
@@ -395,6 +505,11 @@ pub fn OrderStatisticTree(
             if (v) |vn| vn.parent = u.parent;
         }
 
+        /// Fixup nach Löschen eines Knotens.
+        ///
+        /// Behandelt die klassischen Fälle des RB‑Löschens (Double‑Black etc.)
+        /// und stellt die Rot‑Schwarz‑Eigenschaften durch Rotationen und
+        /// Umfärbungen wieder her.
         fn deleteFixup(self: *Self, x_in: ?*Node, x_parent_in: ?*Node) void {
             var x = x_in;
             var x_p = x_parent_in;
