@@ -1,18 +1,40 @@
-### Wonach suche ich?
-Die geforderte Datenstruktur ist ein dynamischer, geordneter Container, der neben insert/delete/search auch predecessor/successor/min/max liefert
-und dabei zusätzlich den In‑Order‑Index i des gefundenen Elements zurückgibt.
+# Order-Statistic-Tree auf Basis eines Rot‑Schwarz‑Baums
 
-### Auswahl einer passenden Basisstruktur
+## Ziel der Datenstruktur
 
-Bei der Suche nach einer geeigneten Basis fuer meine Datenstruktur habe ich mir die verschiedenen Variationen von Baeumen angeschaut.
-Dabei habe ich mich fuer einen **Rot-Schwarz-Baum** entschieden, da dieser eine gute Balance zwischen Einfuege-, Loesch- und Suchoperationen bietet.
-Ein einfacher binaerer Baum kann im Durchschnitt schneller sein, faellt im Worst-Case-Szenario aber weit zurueck was die Performance und Komplexitaet angeht.
-Alternativ haette ich auch einen **AVL-Baum** in Betracht ziehen koennen, aber mit Rot-Schwarz-Baeumen habe ich schon etwas Erfahrung gesammelt was verschiedene Implementierungen angeht, daher habe ich mich gegen den AVL-Baum entschieden.
+Gesucht ist ein dynamischer, geordneter Container, der:
 
-Ein Rot-Schwarz-Baum grantiert uns eine Hoehe von O(log n), was bedeutet, dass alle Operationen wie Einfuegen, Loeschen und Suchen in logarithmischer Zeit durchgefuehrt werden koennen.
-Angesicht der Anforderungen an die Datenstruktur scheint mit dieser Baum am besten geeignet.
+- typische Operationen wie `insert`, `delete`, `search`, `min`, `max` unterstützt
+- zusätzlich `predecessor` und `successor` anbietet
+- zu jedem gefundenen Element seinen In‑Order‑Index \(i\) über alle Elemente inklusive Duplikaten zurückliefert
 
-![](img/ref2.jpg)
+### Warum ein Rot‑Schwarz‑Baum?
+
+Für die Basis kommt nur eine balancierte Suchbaumstruktur in Frage, um alle Operationen in \(O(\log n)\) zu garantieren. Ein Rot‑Schwarz‑Baum bietet hier einen guten Kompromiss:  
+
+- Die Höhe bleibt immer \(O(\log n)\), sodass Einfügen, Löschen und Suchen logarithmisch bleiben.
+- Die Implementierung der Rot‑Schwarz‑Eigenschaften (Farben, Rotationen, Fixups) ist gut dokumentiert und es gibt reichlich Beispiele zur Orientierung.
+
+Einfache binäre Suchbäume können im Durchschnitt zwar schnell sein, werden aber bei ungünstiger Einfügefolge zu einer Liste und verlieren dann die logarithmischen Garantien. AVL‑Bäume wären 
+eine Alternative, sind aber "hungriger".
+Da Rot‑Schwarz‑Bäume hier bereits ausreichend balanciert sind und mir selber auch vertrauter waren, fiel die Wahl leicht.
+
+### Warum „Order‑Statistic‑Tree“?
+
+Ein Order‑Statistic‑Tree (OST) ist ein balancierter Suchbaum, der zusätzlich in jedem Knoten die Groeße seines Teilbaums speichert.
+
+Damit lassen sich Rang‑Operationen wie
+
+- „Wie viele Elemente sind kleiner als `x`?“
+- „Welches Element steht an Rang `i` in der sortierten Folge?“
+
+in \(O(\log n)\) beantworten.
+
+Die vorliegende Implementierung erweitert den Rot‑Schwarz‑Baum genau in diesem Sinne:
+
+- Jeder Knoten kennt die Größe seines Teilbaums (`size`) und die Anzahl gleicher Schlüssel (`count`).
+- `min`, `max`, `predecessor`, `successor` geben neben dem Schlüssel auch seinen In‑Order‑Index zurück.
+
 
 ### Operationen der Datenstruktur
 - `insert(key, value)`: Fuegt ein weiteres Vorkommen von `key` mit zugehoerigem `value` ein; existiert `key` bereits, wird zunaechst nur `count` in diesem Knoten erhoeht, sonst wird ein neuer Knoten mit `count = 1` in den Baum eingefuegt. 
@@ -33,181 +55,156 @@ Angesicht der Anforderungen an die Datenstruktur scheint mit dieser Baum am best
 
 - `successor(z) → <i, key>`: Liefert das kleinste Element mit `key >= z` sowie den Rang `i` des ersten Vorkommens dieses Schluessels in der In‑Order‑Reihenfolge.
 
-### Struktur des Rot-Schwarz-Baums
+## Aufbau des Baums und der Knoten
 
-![](img/ref1.svg)
+### Knotentyp
 
-Bei der Struktur meines Baumes reicht die gewoehnliche Definition eines Rot‑Schwarz‑Baums nicht aus, da ich zusaetzlich die Groesse der Teilbaeume und die Anzahl der gleichen Schluessel speichern muss,
- um das Einfuegen von Duplikaten und die Berechnung der In‑Order‑Raenge in O(log n) zu ermoeglichen.
+Der Knotentyp ist in `node.zig` generisch über den Schlüsseltyp `T` definiert:
 
-Das Feld `key` dient dabei ausschliesslich zur Ordnung und zur Suche im Baum, waehrend im Feld `value` der zugehoerige Wert gespeichert wird.
+```cpp
+pub fn Node(comptime T: type) type {
+    return struct {
+        const Self = @This();
+        data: T,
 
-Jeder Knoten speichert im Feld `size` die Anzahl der Elemente im von ihm entstehenden Teilbaum inklusive aller Duplikate;
-das Feld `count` enthaelt die Multiplizitaet seines Schluessels in genau diesem Knoten.
+        // Kinder und Elternzeiger (klassischer Rot‑Schwarz‑Baum)
+        left: ?*Self,
+        right: ?*Self,
+        parent: ?*Self,
 
+        // Order‑Statistic‑Erweiterung
+        size: usize, // Anzahl Elemente im Teilbaum (inkl. Duplikate)
+        count: usize, // Multiplizität dieses Schlüssels in diesem Knoten
 
-
-```c
-enum Color {
-    Red,
-    Black,
+        // Rot‑Schwarz‑Farbe
+        color: Color,
+    };
 }
+```
 
-const RSTreeNode = struct {
-    color: Color, // Rot oder Schwarz
-    key: KeyType, // Schluessel zur Ordnung und Suche
-    value: ValueType, // zugehoeriger Wert
-    left: ?*RSTreeNode, // linker Kindknoten
-    right: ?*RSTreeNode, // rechter Kindknoten
-    parent: ?*RSTreeNode,// Elternknoten
-    size: usize, // Anzahl der Elemente im Teilbaum inkl. Duplikaten
-    count: usize, // Anzahl gleicher Schluessel in diesem Knoten
+- `data` ist der gespeicherte Schlüssel (es gibt keinen separaten Value‑Typ – der Baum verwaltet allein die Schlüssel).
+- `left`, `right`, `parent` bilden die Baumstruktur.
+- `size` zählt alle Elemente im Teilbaum: `size = size(left) + size(right) + count`.
+- `count` ist die Anzahl gleicher Schlüssel in genau diesem Knoten (Multimengen‑Semantik).
+- `color` ist `Red` oder `Black` und implementiert die Rot‑Schwarz‑Invarianten.
+
+### Baumtyp und Konfiguration
+
+Der eigentliche Baumtyp wird in `root.zig` über eine Zig GenericFactory erzeugt:
+
+```cpp
+pub const OrderStatisticTreeConfig = struct {
+    use_freelist: bool = true,
+    compact_sizes: bool = false,
 };
 ```
 
-### Lautzeitanalyse und Speicherverbrauch
-
-- isEmpty(): O(1)
-
-`Wir pruefen nur ob die Root null ist. Boolean Operation.`
-
-- search(key): O(log n)
-
-`O(log n) da die Hoehe des Baumes log n ist und wir in jedem Schritt die Haelfte der Knoten ignorieren koennen.`
-
-- insert/delete(key, value): O(log n)
-
-`O(log n) da die Hoehe des Baumes log n ist und wir in jedem Schritt die Haelfte der Knoten ignorieren koennen. Das Einfuegen/Loeschen selbst ist eine konstante Operation.`
-
-- min, max: O(log n)
-
-`O(log n) Gleicher Grund wie bei search.`
-
-- predecessor(key), successor(key): O(log n)
-
-#### Speicherbedarf
-
-Der Speicherbedarf der Datenstruktur ist O(n), wobei n die Gesamtanzahl der gespeicherten Elemente inklusive Duplikaten ist.
-
-Fuer jeden unterschiedlichen Schluessel wird genau ein Knoten angelegt, der zusaetzlich zu `key` und `value` mehrere Attribute speichert:
-drei Pointer (`left`, `right`, `parent`), die Farbe `color`, die Teilbaumgroesse `size` sowie den Zaehler `count` fuer Duplikate.
-
-Diese zusaetzlichen Felder erhoehen den konstanten Bedarf des Speichers, aendern aber nicht dessen Ordnung O(n).
-
-### Zig-Code (Pseudocode)
-
-**Ich bin direkt mit Zig eingestiegen, weil ich mit tatsaechlichen kleinen Implementierungen besser Gedanken verfolgen kann. (Und um die Komplexitaet zu testen und zu validieren ob ich gerade Quatch schreibe.)**
-
-Insert:
-```c
-function size(node):
-    if node == null:
-        return 0
-    return node.size
+```cpp
+pub fn OrderStatisticTree(
+    comptime T: type,
+    comptime compareFn: fn (a: T, b: T) std.math.Order,
+    comptime cfg: OrderStatisticTreeConfig,
+) type { ... }
 ```
 
-```c
-function insert(node, key, value):
-    if node == null:
-        // neuer Knoten mit einem Vorkommen
-        return new Node(key, value, count = 1, size = 1)
-    if key < node.key:
-        node.left = insert(node.left, key, value)
-        node.left.parent = node
-    else if key > node.key:
-        node.right = insert(node.right, key, value)
-        node.right.parent = node
-    else:
-        // Duplikat: nur den Zaehler erhoehen
-        node.count += 1
 
-    // Teilbaumgroesse aus Kindern und count neu berechnen
-    node.size = size(node.left) + size(node.right) + node.count
+- `T` ist der Schlüsseltyp.  
+- `compareFn` definiert die Ordnungsrelation (`lt`, `eq`, `gt`).  
+- `cfg` steuert zwei Optimierungen:
+  - `use_freelist`: aktiviert einen Freelist‑Speicherpool für Knoten.
+  - `compact_sizes`: speichert Teilbaumgroeßen intern in einem kompakten Typ (`u32`), um Knoten kleiner zu machen und den Cache besser auszunutzen
 
-    // neue Balancierung
-    return rebalance(node)
 
-```
+## Unterstützte Operationen und Laufzeiten
 
-```c
-function delete(root, key):
-    node = search_node(root, key)
-    if node == null:
-        return root  // nichts zu loeschen
+Die API des Baums bietet aktuell:
 
-    if node.count > 1:
-        // nur ein Vorkommen entfernen
-        node.count -= 1
+- `init(allocator)` / `deinit()`: Erzeugt bzw. zerstört einen Baum.
+- `insert(data: T) !void`: Fügt ein Element ein.
+  - Falls `data` bereits existiert, wird nur `count` des Knotens erhöht.
+  - Andernfalls wird ein neuer Rot‑Schwarz‑Knoten angelegt und der Baum per `insertFixup` rebalanziert.
+- `delete(data: T) void`: Entfernt ein Vorkommen von `data`.
+  - Bei `count > 1` wird nur `count` dekrementiert und entlang des Pfades `size` angepasst.
+  - Bei `count == 1` wird der physische Knoten wie in einem Rot‑Schwarz‑Baum entfernt und mit `deleteFixup` balanciert.
+- `search(data: T) bool`: Prüft, ob `data` mindestens einmal enthalten ist.
+- `isEmpty() bool`: Prüft, ob der Baum leer ist.
+- `min() ?NodeResult`: Liefert das kleinste Element und dessen In‑Order‑Index (immer 0).
+- `max() ?NodeResult`: Liefert das größte Element und den Index des **ersten** Vorkommens dieses Schlüssels in der In‑Order‑Reihenfolge.
+- `predecessor(data: T) ?NodeResult`:
+  - Sucht das größte Element, das **strikt kleiner** als `data` ist (also `< data`).
+  - Gibt Schlüssel und In‑Order‑Index des ersten Vorkommens dieses Schlüssels zurück.
+- `successor(data: T) ?NodeResult`:
+  - Sucht das kleinste Element, das **strikt größer** als `data` ist (also `> data`).
+  - Gibt Schlüssel und In‑Order‑Index des ersten Vorkommens dieses Schlüssels zurück.
 
-        // Groessen auf dem Pfad zur Wurzel aktualisieren
-        current = node
-        while current != null:
-            current.size = size(current.left) + size(current.right) + current.count
-            current = current.parent
-        return root
+Die In‑Order‑Indizes werden aus den gespeicherten `size`‑Werten berechnet:
 
-    // count == 1: physischer Knoten wird entfernt
-    root = delete_node_rb(root, node)
-    return root
-```
+- `sizeOf(node)` liefert die Größe eines Teilbaums (0 bei `null`).
+- `getRank(node)` läuft von einem Knoten bis zur Wurzel und addiert:
+  - die Größen der linken Teilbäume dort, wo der aktuelle Knoten im rechten Kind hängt
+  - plus die jeweiligen `count`‑Werte.  
 
-predecessor/successor: (Mit Hilfsfunktionen)
-```c
-function size(node):
-    if node == null:
-        return 0
-    return node.size
+### Laufzeit und Speicherbedarf
 
-function rank_last(node):
-    // Rang des letzten Vorkommens von node.key
-    i = size(node.left) + node.count
-    current = node
-    while current.parent != null:
-        if current == current.parent.right:
-            // kompletter linker Teilbaum + count des Elternknotens
-            i += size(current.parent.left) + current.parent.count
-        current = current.parent
-    return i
+Durch die Rot‑Schwarz‑Eigenschaften bleibt die Baumhöhe in O(log n), womit gilt:
 
-function rank_first(node):
-    // Rang des ersten Vorkommens von node.key
-    i = size(node.left) + 1
-    current = node
-    while current.parent != null:
-        if current == current.parent.right:
-            i += size(current.parent.left) + current.parent.count
-        current = current.parent
-    return i
+- `insert`, `delete`, `search`, `min`, `max`, `predecessor`, `successor` laufen in O(log n).  
+- Die Zusatzarbeit für `size`‑Aktualisierungen ist auf den Pfad von der Einfüge‑/Löschstelle zur Wurzel beschränkt, also ebenfalls O(log n).
+- Der Speicherbedarf ist O(log n) in der Anzahl der gespeicherten Elemente (inkl. Duplikate). Jeder unterscheidbare Schlüssel benötigt einen Knoten mit
+  - drei Zeigern (`left`, `right`, `parent`),
+  - einem Schlüssel `data`,
+  - Farbe `color`,
+  - Metadaten `size` und `count`.
 
-function predecessor(root, z):
-    node = root; best = null
-    while node != null:
-        if node.key <= z:
-            best = node
-            node = node.right  // suche noch groessere <= z
-        else:
-            node = node.left
-    if best == null:
-        return (null, null)   // kein Vorgaenger
-    // best.key <= z ist der gesuchte Wert
-    i = rank_last(best)       // Rang des letzten Vorkommens
-    return (i, best.key)
+Die Konfiguration `compact_sizes = true` verkleinert den Typ, in dem `size` intern geführt wird (z.B. auf `u32`). Das reduziert die Knotengröße und verbessert Lokalität, setzt aber voraus, dass die maximale Teilbaumgröße nicht über diesen Typ hinauswächst.
 
-function successor(root, z):
-    node = root; best = null
-    while node != null:
-        if node.key >= z:
-            best = node
-            node = node.left   // suche noch kleinere >= z
-        else:
-            node = node.right
-    if best == null:
-        return (null, null)
-    // best.key >= z ist der gesuchte Wert
-    i = rank_first(best)      // Rang des ersten Vorkommens
-    return (i, best.key)
 
-```
+## Implementierungsdetails und Optimierungen
+
+### Balancierung und Fixups
+
+Die Rot‑Schwarz‑Invarianten werden mit klassischen Fixup‑Prozeduren sichergestellt:
+
+- `insertFixup` behandelt die bekannten Fälle (Onkel rot/schwarz, Doppelrot) und führt Rotationen (`rotateLeft` / `rotateRight`) sowie Umfärbungen durch, bis die Invarianten wieder gelten.
+- `deleteFixup` sorgt nach einer Löschung dafür, dass die Schwarzhöhe konsistent bleibt (Behandlung von „Double‑Black“‑Fällen mit passender Fallunterscheidung und Rotationen).
+
+Die Rotationen rufen immer `updateSize` auf den beteiligten Knoten auf, um die `size`‑Information nach der strukturellen Änderung lokal zu reparieren.
+
+### Freelist zur Beschleunigung von Insert/Delete
+
+Optional kann ein Freelist‑Speicherpool pro Baum aktiviert werden:
+
+- Beim Löschen wandern Knoten nicht direkt zum Allocator zurück, sondern in eine einfache Singly‑Linked‑Liste (per `right`‑Zeiger).
+- Beim Einfügen wird zuerst versucht, einen Knoten aus dieser Freelist zu recyceln; erst wenn sie leer ist, wird ein neuer Knoten beim Allocator angefordert.
+- Das reduziert Allokationen/Deallokationen und verbessert die Laufzeit insbesondere in Szenarien mit vielen Lösch‑/Insert‑Zyklen („churn“).
+
+In Benchmarks zeigte der Freelist‑Modus eine deutliche Verbesserung im zyklischen Delete/Insert‑Szenario gegenüber der reinen Allocator‑Variante.
+
+### Kompakte Größenrepräsentation
+
+Mit `compact_sizes = true` wird der interne Typ für Teilbaumgrößen auf einen kleineren Integer‑Typ abgebildet (z.B. `u32`), und an allen Stellen, wo Indizes nach außen als `usize` benötigt werden, findet eine explizite Konvertierung statt.
+
+- Vorteil: kleinere Knoten, bessere Cache‑Nutzung.  
+- Voraussetzung: maximale Teilbaumgröße bleibt im Bereich dieses Typs.
+
+### Micro‑Optimierungen im Hot‑Path
+
+Einige kleine Optimierungen zielen direkt auf den „Hot‑Path“ der Baumoperationen:
+
+- In `insert` wird das Ergebnis von `compareFn(data, node.data)` zwischengespeichert und nicht mehrfach pro Ebene berechnet.
+- `sizeOf` und `updateSize` sind `inline`, damit der Compiler sie in die relevanten Pfade integrieren kann.
+- Rotationen aktualisieren nur die lokal betroffenen Knoten (`updateSize`), während `updatePathSize` gezielt dort eingesetzt wird, wo der gesamte Pfad nach oben neu gerechnet werden muss.
+
+
+## Tests und Validierung
+
+`tests.zig` enthält eine Reihe von Tests, die die Korrektheit der Implementierung absichern:
+
+- Basisfälle (leerer Baum, einfache Inserts/Searches).  
+- `min`, `max` und In‑Order‑Traversierung über `successor`, inklusive Prüfung der Indizes.  
+- `predecessor` und `successor` für vorhandene und nicht vorhandene Schlüssel.  
+- Verhalten bei Duplikaten (richtige Indizes, korrekte Behandlung von `count` beim Löschen).  
+- Unterschiedliche Konfigurationen (`compact_sizes = false/true`) werden mit demselben Testsatz geprüft.
 
 ### Quellen / Hilfsquellen
 
@@ -219,7 +216,11 @@ function successor(root, z):
 - https://groups.csail.mit.edu/mac/projects/info/schemedocs/ref-manual/html/scheme_113.html
 - https://dtu.ac.in/Web/Departments/CSE/faculty/lect/DSA_MK_Lect8.pdf
 - https://www.baeldung.com/cs/skip-lists
-
+- https://lib.rs/crates/indexset
+- https://docs.rs/order-stat/latest/order_stat/
+- https://github.com/CogitatorTech/ordered?tab=readme-ov-file
+- https://www.cs.yale.edu/homes/aspnes/pinewiki/OrderStatisticsTree.html
+- https://en.wikipedia.org/wiki/Order_statistic_tree
 
 Zum "ausprobieren":
 - https://www.cs.usfca.edu/~galles/visualization/RedBlack.html
