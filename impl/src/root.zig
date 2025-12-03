@@ -78,9 +78,14 @@ pub fn OrderStatisticTree(
             var y: ?*Node = null;
             var x = self.root;
 
+            var last_ord: ?Order = null;
+
             while (x) |node| {
                 y = node;
-                switch (compareFn(data, node.data)) {
+                const ord = compareFn(data, node.data);
+                last_ord = ord;
+
+                switch (ord) {
                     .eq => {
                         node.count += 1;
                         self.updatePathSize(node);
@@ -105,12 +110,14 @@ pub fn OrderStatisticTree(
             if (y == null) {
                 self.root = new_node;
             } else {
-                switch (compareFn(data, y.?.data)) {
+                const ord = last_ord orelse unreachable;
+                switch (ord) {
                     .lt => y.?.left = new_node,
                     .gt => y.?.right = new_node,
                     .eq => unreachable,
                 }
             }
+
             self.updatePathSize(new_node);
             self.insertFixup(new_node);
         }
@@ -230,11 +237,11 @@ pub fn OrderStatisticTree(
             return NodeResult{ .index = self.getRank(target), .data = target.data };
         }
 
-        fn sizeOf(node: ?*Node) SizeInt {
+        inline fn sizeOf(node: ?*Node) SizeInt {
             return if (node) |n| @intCast(n.size) else 0;
         }
 
-        fn updateSize(self: *Self, node: *Node) void {
+        inline fn updateSize(self: *Self, node: *Node) void {
             _ = self;
             const left: SizeInt = sizeOf(node.left);
             const right: SizeInt = sizeOf(node.right);
