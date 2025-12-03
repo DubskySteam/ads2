@@ -230,11 +230,11 @@ pub fn OrderStatisticTree(
             return NodeResult{ .index = self.getRank(target), .data = target.data };
         }
 
-        fn sizeOf(node: ?*Node) SizeInt {
+        inline fn sizeOf(node: ?*Node) SizeInt {
             return if (node) |n| @intCast(n.size) else 0;
         }
 
-        fn updateSize(self: *Self, node: *Node) void {
+        inline fn updateSize(self: *Self, node: *Node) void {
             _ = self;
             const left: SizeInt = sizeOf(node.left);
             const right: SizeInt = sizeOf(node.right);
