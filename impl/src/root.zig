@@ -1,3 +1,11 @@
+// TODO: get(index)
+// TODO: insert(index, value)
+// TODO: Memory benchmark (plot?)
+// TODO: next(), prev()
+// TODO: Kontext parameterisierung
+// TODO: Ausblick (Was wuerde noch gehen? Optimierung, Implementierung)
+// TODO: Function benchmark
+
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Order = std.math.Order;
@@ -576,6 +584,100 @@ pub fn OrderStatisticTree(
                 }
             }
             if (x) |xn| xn.color = .Black;
+        }
+
+        /// Liefert den nächsten Schlüssel nach `data` (für existierenden Schlüssel).
+        ///
+        /// - Wenn `data` nicht im Baum ist, gibt null zurück.
+        /// - Sonst: nächstes Element in In-Order-Reihenfolge.
+        pub fn next(self: *Self, data: T) ?NodeResult {
+            const node = self.findNode(data) orelse return null;
+
+            // Wenn rechtes Kind existiert: minimum im rechten Teilbaum
+            if (node.right) |r| {
+                const succ = minimum(r);
+                return NodeResult{ .index = self.getRank(succ), .data = succ.data };
+            }
+
+            // Sonst: erster Vorfahre, bei dem wir von links kommen
+            var curr = node;
+            while (curr.parent) |p| {
+                if (curr == p.left) {
+                    return NodeResult{ .index = self.getRank(p), .data = p.data };
+                }
+                curr = p;
+            }
+
+            return null; // war bereits der größte Schlüssel
+        }
+
+        /// Liefert den vorherigen Schlüssel vor `data` (für existierenden Schlüssel).
+        ///
+        /// - Wenn `data` nicht im Baum ist, gibt null zurück.
+        /// - Sonst: vorheriges Element in In-Order-Reihenfolge.
+        pub fn prev(self: *Self, data: T) ?NodeResult {
+            const node = self.findNode(data) orelse return null;
+
+            // Wenn linkes Kind existiert: maximum im linken Teilbaum
+            if (node.left) |l| {
+                const pred = maximum(l);
+                return NodeResult{ .index = self.getRank(pred), .data = pred.data };
+            }
+
+            // Sonst: erster Vorfahre, bei dem wir von rechts kommen
+            var curr = node;
+            while (curr.parent) |p| {
+                if (curr == p.right) {
+                    return NodeResult{ .index = self.getRank(p), .data = p.data };
+                }
+                curr = p;
+            }
+
+            return null; // war bereits der kleinste Schlüssel
+        }
+
+        /// Liefert das Element an Position `index` in der sortierten Multimenge (0-basiert).
+        ///
+        /// - Gibt null zurück, wenn index >= Gesamtgröße.
+        /// - O(log n) durch Abstieg mittels subtree sizes.
+        pub fn select(self: *Self, index: usize) ?NodeResult {
+            const idx_int: SizeInt = @intCast(index);
+            var node = self.root orelse return null;
+            var remaining: SizeInt = idx_int;
+
+            while (true) {
+                const left_size = sizeOf(node.left);
+
+                if (remaining < left_size) {
+                    // Ziel liegt im linken Teilbaum
+                    node = node.left orelse return null;
+                } else if (remaining < left_size + @as(SizeInt, @intCast(node.count))) {
+                    // Ziel ist in diesem Knoten (eines der Duplikate)
+                    return NodeResult{ .index = index, .data = node.data };
+                } else {
+                    // Ziel liegt im rechten Teilbaum
+                    remaining -= left_size + @as(SizeInt, @intCast(node.count));
+                    node = node.right orelse return null;
+                }
+            }
+        }
+
+        /// Fügt `data` ein und erwartet, dass es an Position `index` landet.
+        ///
+        /// - Wirft einen Fehler, falls die BST‑Ordnung das nicht zulässt.
+        /// - Nützlich für "insert in sorted position", wenn Caller den Rang kennt.
+        pub fn insertAt(self: *Self, index: usize, data: T) !void {
+            try self.insert(data);
+
+            // Validiere, dass das eingefügte Element tatsächlich an `index` liegt
+            const node = self.findNode(data) orelse return error.InsertFailed;
+            const actual_rank = self.getRank(node);
+
+            if (actual_rank != index) {
+                // Rollback: entferne das gerade eingefügte Element wieder
+                self.delete(data);
+                return error.InvalidInsertPosition;
+            }
         }
     };
 }
