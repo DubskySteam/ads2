@@ -13,7 +13,7 @@ A memory‑efficient implementation of an **Order Statistic Tree** based on an a
 
 ## Data structure
 
-Each node only stores the payload `data` and the minimal metadata required for balancing and rank queries. The `size` field is the total number of elements in the subtree (including duplicates via `count`), which allows rank computations in \(O(\log n)\). [attached_file:76]
+Each node only stores the payload `data` and the minimal metadata required for balancing and rank queries. The `size` field is the total number of elements in the subtree (including duplicates via `count`), which allows rank computations in \(O(\log n)\).
 
 ```
 const Node = struct {

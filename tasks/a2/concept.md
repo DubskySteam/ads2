@@ -150,7 +150,7 @@ Durch die Rot‑Schwarz‑Eigenschaften bleibt die Baumhöhe in O(log n), womit 
 
 - `insert`, `delete`, `search`, `min`, `max`, `predecessor`, `successor` laufen in O(log n).  
 - Die Zusatzarbeit für `size`‑Aktualisierungen ist auf den Pfad von der Einfüge‑/Löschstelle zur Wurzel beschränkt, also ebenfalls O(log n).
-- Der Speicherbedarf ist O(log n) in der Anzahl der gespeicherten Elemente (inkl. Duplikate). Jeder unterscheidbare Schlüssel benötigt einen Knoten mit
+- Der Speicherbedarf ist O(n) in der Anzahl der gespeicherten Elemente (inkl. Duplikate). Jeder unterscheidbare Schlüssel benötigt einen Knoten mit
   - drei Zeigern (`left`, `right`, `parent`),
   - einem Schlüssel `data`,
   - Farbe `color`,
