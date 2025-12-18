@@ -1,65 +1,107 @@
 #!/usr/bin/env python3
 import pandas as pd
 import matplotlib.pyplot as plt
-import sys
 
-def plot_results(csv_path):
-    df = pd.read_csv(csv_path)
-    
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-    fig.suptitle('Order-Statistic Tree Performance Profile', fontsize=16)
-    
-    # 1. Time vs Size for each operation
-    ax1 = axes[0, 0]
-    for op in df['operation'].unique():
-        data = df[df['operation'] == op]
-        ax1.plot(data['size'], data['time_ns'] / 1e6, marker='o', label=op)
-    ax1.set_xlabel('Tree Size (n)')
-    ax1.set_ylabel('Time (ms)')
-    ax1.set_title('Operation Time vs Tree Size')
-    ax1.legend()
-    ax1.grid(True, alpha=0.3)
-    
-    # 2. Time per element (normalized)
-    ax2 = axes[0, 1]
-    for op in df['operation'].unique():
-        data = df[df['operation'] == op]
-        time_per_elem = data['time_ns'] / data['size']
-        ax2.plot(data['size'], time_per_elem, marker='o', label=op)
-    ax2.set_xlabel('Tree Size (n)')
-    ax2.set_ylabel('Time per Element (ns)')
-    ax2.set_title('Amortized Cost per Operation')
-    ax2.legend()
-    ax2.grid(True, alpha=0.3)
-    
-    # 3. Memory usage
-    ax3 = axes[1, 0]
-    insert_data = df[df['operation'] == 'insert']
-    ax3.plot(insert_data['size'], insert_data['memory_bytes'] / 1024, marker='o', color='green')
-    ax3.set_xlabel('Tree Size (n)')
-    ax3.set_ylabel('Memory (KB)')
-    ax3.set_title('Memory Usage')
-    ax3.grid(True, alpha=0.3)
-    
-    # 4. Throughput (ops/sec)
-    ax4 = axes[1, 1]
-    for op in df['operation'].unique():
-        data = df[df['operation'] == op]
-        throughput = (data['size'] / (data['time_ns'] / 1e9))
-        ax4.plot(data['size'], throughput / 1e6, marker='o', label=op)
-    ax4.set_xlabel('Tree Size (n)')
-    ax4.set_ylabel('Throughput (M ops/s)')
-    ax4.set_title('Operation Throughput')
-    ax4.legend()
-    ax4.grid(True, alpha=0.3)
-    
-    plt.tight_layout()
-    plt.savefig('benchmark_results.png', dpi=300, bbox_inches='tight')
-    print("Plot saved to benchmark_results.png")
-    plt.show()
+CSV = "../profile.csv"
 
-if __name__ == '__main__':
-    if len(sys.argv) < 2:
-        print("Usage: python plot_benchmark.py results.csv")
-        sys.exit(1)
-    plot_results(sys.argv[1])
+TESTS_SPEED = [
+    "insert_build",
+    "delete_to_empty",
+    "search",
+    "select",
+    "successor",
+    "churn_delete_insert",
+]
+
+def plot_lines(ax, sub, x, y, title, ylabel, logx=True, logy=False):
+    sub = sub.sort_values(["n", "config"])
+    for cfg in ["freelist", "no_freelist"]:
+        s = sub[sub["config"] == cfg]
+        if len(s) == 0:
+            continue
+        ax.plot(s[x], s[y], marker="o", linewidth=2, label=cfg)
+
+    if logx:
+        ax.set_xscale("log", base=2)
+    if logy:
+        ax.set_yscale("log")
+
+    ax.set_title(title)
+    ax.set_xlabel("n")
+    ax.set_ylabel(ylabel)
+    ax.grid(True, alpha=0.3)
+
+def main():
+    df = pd.read_csv(CSV)
+
+    # Ensure the expected configs exist
+    print("configs:", sorted(df["config"].unique()))
+    print("tests:", sorted(df["test"].unique()))
+
+    # One big figure: 3 rows x 3 cols
+    fig, axes = plt.subplots(3, 3, figsize=(18, 12), constrained_layout=True)
+    fig.suptitle("OST profiling: speed + allocator behaviour (freelist vs no_freelist)", fontsize=16)
+
+    # 6 speed plots
+    for i, test in enumerate(TESTS_SPEED):
+        r = i // 3
+        c = i % 3
+        sub = df[df["test"] == test]
+        plot_lines(
+            axes[r, c],
+            sub,
+            x="n",
+            y="ops_per_sec",
+            title=f"{test} ops/s",
+            ylabel="ops/s",
+            logx=True,
+            logy=False,
+        )
+
+    # churn alloc_calls (this should show freelist advantage)
+    sub_churn = df[df["test"] == "churn_delete_insert"]
+    plot_lines(
+        axes[2, 0],
+        sub_churn,
+        x="n",
+        y="alloc_calls",
+        title="churn: alloc_calls",
+        ylabel="alloc() calls",
+        logx=True,
+        logy=False,
+    )
+
+    # churn total_alloc_bytes (also shows freelist advantage)
+    plot_lines(
+        axes[2, 1],
+        sub_churn,
+        x="n",
+        y="total_alloc_bytes",
+        title="churn: total_alloc_bytes",
+        ylabel="bytes",
+        logx=True,
+        logy=False,
+    )
+
+    # insert_build peak_bytes 
+    sub_build = df[df["test"] == "insert_build"]
+    plot_lines(
+        axes[2, 2],
+        sub_build,
+        x="n",
+        y="peak_bytes",
+        title="insert_build: peak_bytes",
+        ylabel="bytes",
+        logx=True,
+        logy=False,
+    )
+
+
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="upper right", frameon=True)
+
+    fig.savefig("all_plots.png", dpi=200)
+    print("Wrote all_plots.png")
+
+if __name__ == "__main__":
+    main()
