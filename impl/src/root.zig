@@ -76,9 +76,9 @@ pub fn OrderStatisticTree(
             if (cfg.use_freelist) {
                 var n = self.free_list;
                 while (n) |node| {
-                    const next = node.right;
+                    const next_free = node.right;
                     self.allocator.destroy(node);
-                    n = next;
+                    n = next_free;
                 }
                 self.free_list = null;
             }

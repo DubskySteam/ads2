@@ -63,6 +63,24 @@ pub fn build(b: *std.Build) void {
     bench_step.dependOn(&run_bench.step);
 
     // ============================================================
+    // COMPILE PROFILING
+    // ============================================================
+    const profiling = b.addExecutable(.{
+        .name = "profiling",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("benchmarks/profiling.zig"),
+            .target = target,
+            .optimize = .ReleaseFast,
+        }),
+    });
+    profiling.root_module.addImport("ost", ost_mod);
+    b.installArtifact(profiling);
+
+    const profiling_cmd = b.addRunArtifact(profiling);
+    const profiling_step = b.step("profile", "Run profiling benchmark");
+    profiling_step.dependOn(&profiling_cmd.step);
+
+    // ============================================================
     // TESTS
     // ============================================================
     // Library-internal tests in src/root.zig
